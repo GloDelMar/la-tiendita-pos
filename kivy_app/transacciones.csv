@@ -1,0 +1,45 @@
+fecha,nombre,grupo,tipo,impresora,copias,precio_unitario,total,pago,cambio,pagado,archivo
+2025-09-19 19:45:44,Vianey,Cocina,Agua 1L x1,15.0,20.0,5.0,SI
+2025-09-19 19:46:00,Vianey,Cocina,Agua 1L x1,15.0,20.0,5.0,SI
+2025-09-19 19:51:06,Toño,TS,Agua 1L x1,15.0,50.0,35.0,SI
+2025-09-19 23:02:58,Andrea,2° de nowere,Agua 500ml x1; billetes de juguete x2,34.0,50.0,16.0,SI
+2025-09-19 23:03:56,Don Hermenegildo,2° lic en idiomas,billetes de juguete x1,12.0,20.0,8.0,SI
+2025-09-19 23:06:17,Maribel Guardia,Sonequiera,billetes de juguete x2,24.0,30.0,6.0,SI
+2025-09-19 23:11:49,Dexter,Laboratorio Secreto,billetes de juguete x1,12.0,20.0,8.0,SI
+2025-09-19 23:12:52,Almendras,Cacahuates,Agua 500ml x1,10.0,20.0,10.0,SI
+2025-09-20 12:08:50,Gloriela,Docente Laboral,Agua 500ml x1; Agua 1L x1,25.0,50.0,25.0,SI
+2025-09-20 12:15:17,Chucky,Tucasa,Agua 500ml x1; Agua 1L x2,40.0,50.0,10.0,SI
+2025-10-08 09:53:56,Cliente,General,Agua 500ml x2,20.0,51.0,31.0,SI
+2025-10-08 09:54:23,Cliente,General,Agua 500ml x2,20.0,0.0,-20.0,SI
+2025-10-08 10:11:10,Cliente,General,Agua 500ml x1,10.0,10.0,0.0,SI
+2025-10-08 12:25:26,Cliente,General,Agua 500ml x1,10.0,0.0,0.0,NO
+2025-10-08 12:57:56,Cliente,General,Agua 500ml x8,80.0,0.0,0.0,NO
+2025-10-08 12:57:56,paco,laboral,Agua 500ml x8,80.0,0.0,0.0,NO
+2025-10-08 13:01:47,Cliente,General,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:01:47,miel,laboral,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:02:30,Cliente,General,Agua 500ml x4,40.0,50.0,10.0,SI
+2025-10-08 13:05:51,Cliente,General,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:05:51,joel,segundp,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:06:41,Cliente,General,Agua 500ml x3,30.0,50.0,20.0,SI
+2025-10-08 13:09:01,Cliente,General,Agua 500ml x1,10.0,0.0,0.0,NO
+2025-10-08 13:09:01,tamara,quinto,Agua 500ml x1,10.0,0.0,0.0,NO
+2025-10-08 13:09:41,Cliente,General,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:09:55,Cliente,General,Agua 500ml x2,20.0,40.0,20.0,SI
+2025-10-08 13:13:38,Cliente,General,Agua 500ml x2,20.0,50.0,30.0,SI
+2025-10-08 13:13:50,Cliente,General,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:13:50,Toño,TS,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:14:43,Cliente,General,Agua 500ml x3,30.0,100.0,70.0,SI
+2025-10-08 13:26:40,Cliente,General,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:26:40,Miel,Laboral,Agua 500ml x2,20.0,0.0,0.0,NO
+2025-10-08 13:40:42,Cliente,General,copias b/n x10,20.0,100.0,80.0,SI
+2025-10-08 14:10:48,,copias b/n x2,4.0,0.0,0.0,venta
+2025-10-08 14:10:48,,copias b/n x2,4.0,0.0,0.0,venta
+2025-10-08 14:31:20,,copias b/n x2,4.0,10.0,6.0,venta
+2025-10-08 14:45:37,,copias b/n x3,6.0,10.0,4.0,venta
+2025-10-08 14:46:05,,Agua 500ml x7,70.0,100.0,0.0,venta
+2025-10-08 14:46:05,,Agua 500ml x7,70.0,100.0,0.0,venta
+2025-10-08 14:50:46,,copias b/n x2,4.0,10.0,6.0,venta
+2025-10-08 15:33:14,,copias b/n x2,4.0,20.0,16.0,venta
+2025-10-08 15:34:04,,Agua 500ml x3,30.0,50.0,20.0,venta
+2025-10-08 15:36:14,,copias b/n x2,4.0,5.0,1.0,venta
+2025-10-08 22:16:51,,copias b/n x1; Agua 500ml x5,52.0,0.0,0.0,venta

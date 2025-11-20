@@ -1,0 +1,23 @@
+[
+  {
+    "nombre": "joel",
+    "grupo": "segundp",
+    "deuda": 20.0,
+    "fecha_primera_deuda": "2025-10-08 13:05:51",
+    "ultima_compra": "2025-10-08 13:05:51"
+  },
+  {
+    "nombre": "Miel",
+    "grupo": "Laboral",
+    "deuda": 20.0,
+    "fecha_primera_deuda": "2025-10-08 13:26:40",
+    "ultima_compra": "2025-10-08 13:26:40"
+  },
+  {
+    "nombre": "mariano",
+    "grupo": "ieenn",
+    "deuda": 70.0,
+    "fecha_primera_deuda": "2025-10-08 14:46:05",
+    "ultima_compra": "2025-10-08 14:46:05"
+  }
+]

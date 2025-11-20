@@ -1,0 +1,27 @@
+# Python
+venv/
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/backend.log
+backend/nohup.out
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

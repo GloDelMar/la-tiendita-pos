@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Agua 500ml",
+    "price": "10",
+    "image": "assets/default_photo.png"
+  },
+  {
+    "name": "copias b/n",
+    "price": "2.0",
+    "image": "assets/bw_icon_1.png"
+  }
+]
