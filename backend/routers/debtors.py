@@ -70,7 +70,11 @@ async def create_debtor(debtor: DebtorCreate):
         raise HTTPException(status_code=500, detail=f"Error al crear deudor: {str(e)}")
 
 @router.patch("/{debtor_id}/pay", response_model=PaymentResponse)
-async def pay_debt(debtor_id: int, monto: float = Query(..., gt=0)):
+async def pay_debt(
+    debtor_id: int, 
+    monto: float = Query(..., gt=0),
+    caja_id: Optional[int] = Query(None, description="ID de la caja donde se recibe el pago")
+):
     """Registrar pago de deuda"""
     try:
         # Obtener deudor actual
@@ -84,19 +88,30 @@ async def pay_debt(debtor_id: int, monto: float = Query(..., gt=0)):
         if nueva_deuda < 0:
             raise HTTPException(status_code=400, detail="El monto excede la deuda")
         
+        # Obtener saldo actual de la caja específica
+        balance_query = supabase.table("cash_operations").select("*").order("fecha", desc=True).order("id", desc=True).limit(1)
+        if caja_id:
+            balance_query = balance_query.eq("caja_id", caja_id)
+        last_operation = balance_query.execute()
+        
+        # Si no hay operaciones previas, obtener saldo inicial de la caja
+        if not last_operation.data and caja_id:
+            caja = supabase.table("cajas").select("saldo_inicial").eq("id", caja_id).execute()
+            current_balance = caja.data[0]["saldo_inicial"] if caja.data else 0
+        else:
+            current_balance = last_operation.data[0]["saldo"] if last_operation.data else 0
+        
         # Si la deuda queda en 0, eliminar el deudor
         if nueva_deuda == 0:
             supabase.table("debtors").delete().eq("id", debtor_id).execute()
             
             # Registrar en caja el pago
-            last_operation = supabase.table("cash_operations").select("*").order("fecha", desc=True).limit(1).execute()
-            current_balance = last_operation.data[0]["saldo"] if last_operation.data else 0
-            
             cash_operation = {
                 "tipo_operacion": "INGRESO",
                 "monto": monto,
                 "saldo": current_balance + monto,
-                "descripcion": f"Pago de deuda - {debtor['nombre']} ({debtor['grupo']}) - Saldada completamente"
+                "descripcion": f"Pago de deuda - {debtor['nombre']} ({debtor['grupo']}) - Saldada completamente",
+                "caja_id": caja_id
             }
             supabase.table("cash_operations").insert(cash_operation).execute()
             
@@ -110,14 +125,12 @@ async def pay_debt(debtor_id: int, monto: float = Query(..., gt=0)):
             response = supabase.table("debtors").update({"deuda": nueva_deuda}).eq("id", debtor_id).execute()
             
             # Registrar en caja el pago
-            last_operation = supabase.table("cash_operations").select("*").order("fecha", desc=True).limit(1).execute()
-            current_balance = last_operation.data[0]["saldo"] if last_operation.data else 0
-            
             cash_operation = {
                 "tipo_operacion": "INGRESO",
                 "monto": monto,
                 "saldo": current_balance + monto,
-                "descripcion": f"Pago parcial de deuda - {debtor['nombre']} ({debtor['grupo']}) - Resta ${nueva_deuda:.2f}"
+                "descripcion": f"Pago parcial de deuda - {debtor['nombre']} ({debtor['grupo']}) - Resta ${nueva_deuda:.2f}",
+                "caja_id": caja_id
             }
             supabase.table("cash_operations").insert(cash_operation).execute()
             
