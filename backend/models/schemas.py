@@ -79,6 +79,7 @@ class DebtorBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=200)
     grupo: str = Field(..., min_length=1, max_length=200)
     deuda: float = Field(..., gt=0)
+    caja_id: Optional[int] = None
 
 class DebtorCreate(DebtorBase):
     pass
