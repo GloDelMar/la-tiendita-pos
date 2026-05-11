@@ -1,10 +1,46 @@
-from supabase import create_client, Client
 import os
+from pymongo import ASCENDING, MongoClient, ReturnDocument
 from dotenv import load_dotenv
 
 load_dotenv()
 
-supabase_url: str = os.getenv("SUPABASE_URL", "")
-supabase_key: str = os.getenv("SUPABASE_KEY", "")
+mongodb_uri: str = os.getenv("MONGODB_URI", "").strip()
+mongodb_db_name: str = os.getenv("MONGODB_DB", "la_tiendita").strip()
 
-supabase: Client = create_client(supabase_url, supabase_key)
+if not mongodb_uri:
+    raise RuntimeError("Missing MONGODB_URI in environment configuration")
+
+mongo_client: MongoClient = MongoClient(mongodb_uri, serverSelectionTimeoutMS=5000)
+mongo_client.admin.command("ping")
+db = mongo_client[mongodb_db_name]
+
+
+def get_next_sequence(collection_name: str) -> int:
+    counter = db.counters.find_one_and_update(
+        {"_id": collection_name},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(counter["seq"])
+
+
+def _initialize_indexes() -> None:
+    collections_with_numeric_id = [
+        "cajas",
+        "products",
+        "transactions",
+        "debtors",
+        "cash_operations",
+    ]
+    for collection in collections_with_numeric_id:
+        db[collection].create_index([("id", ASCENDING)], unique=True)
+
+    db.cajas.create_index([("nombre", ASCENDING)], unique=True)
+    db.products.create_index([("name", ASCENDING)])
+    db.transactions.create_index([("fecha", ASCENDING)])
+    db.debtors.create_index([("deuda", ASCENDING)])
+    db.cash_operations.create_index([("fecha", ASCENDING)])
+
+
+_initialize_indexes()

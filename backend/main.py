@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from routers import products, transactions, debtors, cash, cajas
-import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,6 +12,10 @@ app = FastAPI(
     description="Point of Sale API for La Tiendita",
     version="1.0.0"
 )
+
+uploads_dir = Path(__file__).resolve().parent / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(uploads_dir)), name="static")
 
 # CORS configuration - Allow all origins for production
 app.add_middleware(

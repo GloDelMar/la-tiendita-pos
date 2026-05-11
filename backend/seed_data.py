@@ -1,36 +1,51 @@
 """
-Script para insertar datos de prueba en Supabase
+Script para insertar datos de prueba en MongoDB
 Ejecutar: python seed_data.py
 """
 import sys
-import os
 from pathlib import Path
+from datetime import datetime
+from pymongo import DESCENDING
 
 # Agregar el directorio backend al path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
-from database import supabase
+from database import db, get_next_sequence
 
 def seed_products():
     """Insertar productos de prueba"""
-    products = [
-        {"name": "Coca Cola 600ml", "price": 1.50},
-        {"name": "Pepsi 600ml", "price": 1.50},
-        {"name": "Agua 500ml", "price": 0.75},
-        {"name": "Galletas Oreo", "price": 2.00},
-        {"name": "Pan Blanco", "price": 1.20},
-        {"name": "Leche 1L", "price": 1.80},
-        {"name": "Café Nescafé 100g", "price": 5.50},
-        {"name": "Azúcar 1kg", "price": 2.30},
-        {"name": "Arroz 1kg", "price": 1.90},
-        {"name": "Aceite 900ml", "price": 3.50},
-    ]
-    
     try:
-        response = supabase.table("products").insert(products).execute()
+        now = datetime.utcnow()
+        raw_products = [
+            {"name": "Coca Cola 600ml", "price": 1.50},
+            {"name": "Pepsi 600ml", "price": 1.50},
+            {"name": "Agua 500ml", "price": 0.75},
+            {"name": "Galletas Oreo", "price": 2.00},
+            {"name": "Pan Blanco", "price": 1.20},
+            {"name": "Leche 1L", "price": 1.80},
+            {"name": "Café Nescafé 100g", "price": 5.50},
+            {"name": "Azúcar 1kg", "price": 2.30},
+            {"name": "Arroz 1kg", "price": 1.90},
+            {"name": "Aceite 900ml", "price": 3.50},
+        ]
+
+        products = []
+        for p in raw_products:
+            p_doc = {
+                "id": get_next_sequence("products"),
+                "name": p["name"],
+                "price": p["price"],
+                "stock": 0,
+                "image_url": None,
+                "caja_id": None,
+                "created_at": now,
+            }
+            products.append(p_doc)
+
+        db.products.insert_many(products)
         print(f"✅ {len(products)} productos insertados correctamente")
-        return response.data
+        return products
     except Exception as e:
         print(f"❌ Error al insertar productos: {e}")
         return None
@@ -39,21 +54,24 @@ def seed_cash_initial():
     """Insertar saldo inicial de caja"""
     try:
         # Verificar si ya existe un saldo
-        existing = supabase.table("cash_operations").select("*").limit(1).execute()
-        if existing.data:
+        existing = db.cash_operations.find_one({}, {"_id": 0})
+        if existing:
             print("ℹ️  Ya existe un saldo de caja, omitiendo inserción")
-            return existing.data[0]
-        
+            return existing
+
         # Crear saldo inicial
         initial_cash = {
+            "id": get_next_sequence("cash_operations"),
             "tipo_operacion": "AJUSTE",
             "monto": 100.00,
             "saldo": 100.00,
-            "descripcion": "Saldo inicial de caja"
+            "descripcion": "Saldo inicial de caja",
+            "caja_id": None,
+            "fecha": datetime.utcnow(),
         }
-        response = supabase.table("cash_operations").insert(initial_cash).execute()
-        print(f"✅ Saldo inicial de caja: ${response.data[0]['saldo']}")
-        return response.data[0]
+        db.cash_operations.insert_one(initial_cash)
+        print(f"✅ Saldo inicial de caja: ${initial_cash['saldo']}")
+        return initial_cash
     except Exception as e:
         print(f"❌ Error al insertar saldo inicial: {e}")
         return None
@@ -62,57 +80,65 @@ def seed_sample_transaction():
     """Crear una transacción de ejemplo"""
     try:
         # Obtener algunos productos
-        products = supabase.table("products").select("*").limit(3).execute()
-        if not products.data:
+        products = list(db.products.find({}, {"_id": 0}).limit(3))
+        if not products:
             print("⚠️  No hay productos, primero ejecuta seed_products()")
             return None
-        
+
         # Crear transacción
+        now = datetime.utcnow()
         transaction = {
+            "id": get_next_sequence("transactions"),
             "cliente": "Cliente de Prueba",
             "grupo": "General",
             "productos": [
                 {
-                    "nombre": products.data[0]["name"],
+                    "nombre": products[0]["name"],
                     "cantidad": 2,
-                    "precio_unitario": products.data[0]["price"],
-                    "subtotal": products.data[0]["price"] * 2
+                    "precio_unitario": products[0]["price"],
+                    "subtotal": products[0]["price"] * 2
                 },
                 {
-                    "nombre": products.data[1]["name"],
+                    "nombre": products[1]["name"],
                     "cantidad": 1,
-                    "precio_unitario": products.data[1]["price"],
-                    "subtotal": products.data[1]["price"]
+                    "precio_unitario": products[1]["price"],
+                    "subtotal": products[1]["price"]
                 }
             ],
-            "total": (products.data[0]["price"] * 2) + products.data[1]["price"],
-            "pago": (products.data[0]["price"] * 2) + products.data[1]["price"],
+            "total": (products[0]["price"] * 2) + products[1]["price"],
+            "pago": (products[0]["price"] * 2) + products[1]["price"],
             "cambio": 0,
-            "pagado": "SI"
+            "pagado": "SI",
+            "caja_id": None,
+            "fecha": now,
         }
-        
-        response = supabase.table("transactions").insert(transaction).execute()
-        
+
+        db.transactions.insert_one(transaction)
+
         # Actualizar caja
-        last_cash = supabase.table("cash_operations").select("*").order("fecha", desc=True).limit(1).execute()
-        new_balance = last_cash.data[0]["saldo"] + transaction["pago"]
-        
+        last_cash = db.cash_operations.find_one({}, {"_id": 0}, sort=[("fecha", DESCENDING), ("id", DESCENDING)])
+        current_balance = float(last_cash["saldo"]) if last_cash else 0.0
+        new_balance = current_balance + transaction["pago"]
+
         cash_op = {
+            "id": get_next_sequence("cash_operations"),
             "tipo_operacion": "VENTA",
             "monto": transaction["pago"],
             "saldo": new_balance,
-            "descripcion": f"Venta de prueba - {len(transaction['productos'])} productos"
+            "descripcion": f"Venta de prueba - {len(transaction['productos'])} productos",
+            "caja_id": None,
+            "fecha": now,
         }
-        supabase.table("cash_operations").insert(cash_op).execute()
-        
+        db.cash_operations.insert_one(cash_op)
+
         print(f"✅ Transacción de prueba creada: ${transaction['total']}")
-        return response.data[0]
+        return transaction
     except Exception as e:
         print(f"❌ Error al crear transacción: {e}")
         return None
 
 def main():
-    print("🌱 Insertando datos de prueba en Supabase...\n")
+    print("🌱 Insertando datos de prueba en MongoDB...\n")
     
     # 1. Productos
     print("📦 Insertando productos...")
@@ -129,7 +155,7 @@ def main():
     print("\n✨ ¡Datos de prueba insertados correctamente!")
     print("\n📊 Puedes verificar en:")
     print("   - API Docs: http://localhost:8000/docs")
-    print("   - Supabase: https://supabase.com/dashboard")
+    print("   - MongoDB: revisa la base configurada en MONGODB_DB")
 
 if __name__ == "__main__":
     main()

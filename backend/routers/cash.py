@@ -1,10 +1,17 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 from models.schemas import CashOperation, CashOperationCreate
-from database import supabase
+from database import db, get_next_sequence
 from datetime import datetime
+from pymongo import DESCENDING
 
 router = APIRouter()
+
+
+def _parse_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 @router.get("/", response_model=List[CashOperation])
 async def get_cash_operations(
@@ -17,19 +24,23 @@ async def get_cash_operations(
 ):
     """Obtener movimientos de caja con filtros opcionales"""
     try:
-        query = supabase.table("cash_operations").select("*")
-        
+        mongo_filter = {}
         if fecha_desde:
-            query = query.gte("fecha", fecha_desde)
+            mongo_filter.setdefault("fecha", {})["$gte"] = _parse_date(fecha_desde)
         if fecha_hasta:
-            query = query.lte("fecha", fecha_hasta)
+            mongo_filter.setdefault("fecha", {})["$lte"] = _parse_date(fecha_hasta)
         if tipo_operacion:
-            query = query.eq("tipo_operacion", tipo_operacion)
+            mongo_filter["tipo_operacion"] = tipo_operacion
         if caja_id is not None:
-            query = query.eq("caja_id", caja_id)
-        
-        response = query.order("fecha", desc=True).range(skip, skip + limit - 1).execute()
-        return response.data
+            mongo_filter["caja_id"] = caja_id
+
+        operations = list(
+            db.cash_operations.find(mongo_filter, {"_id": 0})
+            .sort([("fecha", DESCENDING), ("id", DESCENDING)])
+            .skip(skip)
+            .limit(limit)
+        )
+        return operations
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener operaciones: {str(e)}")
 
@@ -37,37 +48,40 @@ async def get_cash_operations(
 async def get_current_balance(caja_id: Optional[int] = None):
     """Obtener saldo actual de caja (todas o una específica)"""
     try:
-        query = supabase.table("cash_operations").select("*")
-        
+        mongo_filter = {}
         if caja_id is not None:
-            query = query.eq("caja_id", caja_id)
-        
-        last_operation = query.order("fecha", desc=True).order("id", desc=True).limit(1).execute()
-        
-        if not last_operation.data:
+            mongo_filter["caja_id"] = caja_id
+
+        last_operation = db.cash_operations.find_one(
+            mongo_filter,
+            {"_id": 0},
+            sort=[("fecha", DESCENDING), ("id", DESCENDING)],
+        )
+
+        if not last_operation:
             # Si no hay operaciones y es una caja específica, obtener saldo inicial
             if caja_id is not None:
-                caja = supabase.table("cajas").select("saldo_inicial, nombre").eq("id", caja_id).execute()
-                if caja.data:
+                caja = db.cajas.find_one({"id": caja_id}, {"_id": 0, "saldo_inicial": 1, "nombre": 1})
+                if caja:
                     return {
-                        "saldo": caja.data[0]["saldo_inicial"],
+                        "saldo": caja["saldo_inicial"],
                         "ultima_actualizacion": None,
                         "caja_id": caja_id,
-                        "caja_nombre": caja.data[0]["nombre"]
+                        "caja_nombre": caja["nombre"]
                     }
             return {"saldo": 0, "ultima_actualizacion": None}
-        
+
         result = {
-            "saldo": last_operation.data[0]["saldo"],
-            "ultima_actualizacion": last_operation.data[0]["fecha"]
+            "saldo": last_operation["saldo"],
+            "ultima_actualizacion": last_operation["fecha"]
         }
-        
+
         if caja_id is not None:
             result["caja_id"] = caja_id
-            caja = supabase.table("cajas").select("nombre").eq("id", caja_id).execute()
-            if caja.data:
-                result["caja_nombre"] = caja.data[0]["nombre"]
-        
+            caja = db.cajas.find_one({"id": caja_id}, {"_id": 0, "nombre": 1})
+            if caja:
+                result["caja_nombre"] = caja["nombre"]
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener saldo: {str(e)}")
@@ -76,10 +90,10 @@ async def get_current_balance(caja_id: Optional[int] = None):
 async def get_cash_operation(operation_id: int):
     """Obtener una operación por ID"""
     try:
-        response = supabase.table("cash_operations").select("*").eq("id", operation_id).execute()
-        if not response.data:
+        operation = db.cash_operations.find_one({"id": operation_id}, {"_id": 0})
+        if not operation:
             raise HTTPException(status_code=404, detail="Operación no encontrada")
-        return response.data[0]
+        return operation
     except HTTPException:
         raise
     except Exception as e:
@@ -90,20 +104,23 @@ async def create_cash_operation(operation: CashOperationCreate):
     """Crear una nueva operación de caja (ingreso, egreso o ajuste)"""
     try:
         # Obtener saldo actual de la caja específica
-        query = supabase.table("cash_operations").select("*").order("fecha", desc=True).order("id", desc=True).limit(1)
-        
+        last_filter = {}
         if operation.caja_id is not None:
-            query = query.eq("caja_id", operation.caja_id)
-        
-        last_operation = query.execute()
-        
+            last_filter["caja_id"] = operation.caja_id
+
+        last_operation = db.cash_operations.find_one(
+            last_filter,
+            {"_id": 0},
+            sort=[("fecha", DESCENDING), ("id", DESCENDING)],
+        )
+
         # Si no hay operaciones previas y hay caja_id, usar saldo inicial de la caja
-        if not last_operation.data and operation.caja_id is not None:
-            caja = supabase.table("cajas").select("saldo_inicial").eq("id", operation.caja_id).execute()
-            current_balance = caja.data[0]["saldo_inicial"] if caja.data else 0
+        if not last_operation and operation.caja_id is not None:
+            caja = db.cajas.find_one({"id": operation.caja_id}, {"_id": 0, "saldo_inicial": 1})
+            current_balance = caja["saldo_inicial"] if caja else 0
         else:
-            current_balance = last_operation.data[0]["saldo"] if last_operation.data else 0
-        
+            current_balance = last_operation["saldo"] if last_operation else 0
+
         # Calcular nuevo saldo
         if operation.tipo_operacion in ["INGRESO", "VENTA"]:
             new_balance = current_balance + abs(operation.monto)
@@ -115,9 +132,12 @@ async def create_cash_operation(operation: CashOperationCreate):
         # Crear operación
         operation_dict = operation.model_dump()
         operation_dict["saldo"] = new_balance
-        
-        response = supabase.table("cash_operations").insert(operation_dict).execute()
-        return response.data[0]
+        operation_dict["id"] = get_next_sequence("cash_operations")
+        operation_dict["fecha"] = datetime.utcnow()
+
+        db.cash_operations.insert_one(operation_dict)
+        operation_dict.pop("_id", None)
+        return operation_dict
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear operación: {str(e)}")
 
@@ -170,47 +190,55 @@ async def get_daily_cash_stats(fecha: Optional[str] = None, caja_id: Optional[in
         if not fecha:
             fecha = datetime.now().strftime("%Y-%m-%d")
         
-        fecha_inicio = f"{fecha}T00:00:00"
-        fecha_fin = f"{fecha}T23:59:59"
-        
+        fecha_inicio = datetime.fromisoformat(f"{fecha}T00:00:00")
+        fecha_fin = datetime.fromisoformat(f"{fecha}T23:59:59")
+
         print(f"[DEBUG] getDailyStats - fecha: {fecha}, caja_id: {caja_id}")
         print(f"[DEBUG] Rango: {fecha_inicio} a {fecha_fin}")
-        
-        query = supabase.table("cash_operations").select("*").gte("fecha", fecha_inicio).lte("fecha", fecha_fin)
+
+        current_day_filter = {"fecha": {"$gte": fecha_inicio, "$lte": fecha_fin}}
         if caja_id is not None:
-            query = query.eq("caja_id", caja_id)
-        operations = query.execute()
-        
-        print(f"[DEBUG] Operaciones encontradas: {len(operations.data)}")
-        if operations.data:
-            print(f"[DEBUG] Primera operación: {operations.data[0]}")
-        
-        ingresos = sum(op["monto"] for op in operations.data if op["tipo_operacion"] in ["INGRESO", "VENTA"] and op["monto"] > 0)
-        egresos = sum(abs(op["monto"]) for op in operations.data if op["tipo_operacion"] == "EGRESO")
-        ajustes = sum(op["monto"] for op in operations.data if op["tipo_operacion"] == "AJUSTE")
-        
+            current_day_filter["caja_id"] = caja_id
+        operations = list(db.cash_operations.find(current_day_filter, {"_id": 0}))
+
+        print(f"[DEBUG] Operaciones encontradas: {len(operations)}")
+        if operations:
+            print(f"[DEBUG] Primera operación: {operations[0]}")
+
+        ingresos = sum(op["monto"] for op in operations if op["tipo_operacion"] in ["INGRESO", "VENTA"] and op["monto"] > 0)
+        egresos = sum(abs(op["monto"]) for op in operations if op["tipo_operacion"] == "EGRESO")
+        ajustes = sum(op["monto"] for op in operations if op["tipo_operacion"] == "AJUSTE")
+
         print(f"[DEBUG] ingresos: {ingresos}, egresos: {egresos}, ajustes: {ajustes}")
-        
+
         # Saldo al inicio del día
-        query_before = supabase.table("cash_operations").select("*").lt("fecha", fecha_inicio)
+        query_before = {"fecha": {"$lt": fecha_inicio}}
         if caja_id is not None:
-            query_before = query_before.eq("caja_id", caja_id)
-        operations_before = query_before.order("fecha", desc=True).limit(1).execute()
-        
+            query_before["caja_id"] = caja_id
+        operation_before = db.cash_operations.find_one(
+            query_before,
+            {"_id": 0},
+            sort=[("fecha", DESCENDING), ("id", DESCENDING)],
+        )
+
         # Si no hay operaciones previas y hay caja_id, usar saldo inicial de la caja
-        if not operations_before.data and caja_id is not None:
-            caja = supabase.table("cajas").select("saldo_inicial").eq("id", caja_id).execute()
-            saldo_inicial = caja.data[0]["saldo_inicial"] if caja.data else 0
+        if not operation_before and caja_id is not None:
+            caja = db.cajas.find_one({"id": caja_id}, {"_id": 0, "saldo_inicial": 1})
+            saldo_inicial = caja["saldo_inicial"] if caja else 0
         else:
-            saldo_inicial = operations_before.data[0]["saldo"] if operations_before.data else 0
-        
+            saldo_inicial = operation_before["saldo"] if operation_before else 0
+
         # Saldo actual
-        query_current = supabase.table("cash_operations").select("*")
+        query_current = {}
         if caja_id is not None:
-            query_current = query_current.eq("caja_id", caja_id)
-        current = query_current.order("fecha", desc=True).limit(1).execute()
-        saldo_actual = current.data[0]["saldo"] if current.data else saldo_inicial
-        
+            query_current["caja_id"] = caja_id
+        current = db.cash_operations.find_one(
+            query_current,
+            {"_id": 0},
+            sort=[("fecha", DESCENDING), ("id", DESCENDING)],
+        )
+        saldo_actual = current["saldo"] if current else saldo_inicial
+
         return {
             "fecha": fecha,
             "saldo_inicial": saldo_inicial,
@@ -228,10 +256,10 @@ async def delete_cash_operation(operation_id: int):
     """Eliminar una operación de caja (requiere recalcular saldos)"""
     try:
         # Obtener la operación a eliminar
-        operation = supabase.table("cash_operations").select("*").eq("id", operation_id).execute()
-        if not operation.data:
+        operation = db.cash_operations.find_one({"id": operation_id}, {"_id": 0})
+        if not operation:
             raise HTTPException(status_code=404, detail="Operación no encontrada")
-        
+
         # Esta es una operación compleja que requiere recalcular todos los saldos posteriores
         # Por seguridad, mejor no permitir eliminar operaciones
         raise HTTPException(

@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 from models.schemas import Caja, CajaCreate, CajaUpdate
-from database import supabase
+from database import db, get_next_sequence
+from datetime import datetime
+from pymongo import ASCENDING, DESCENDING
 
 router = APIRouter()
 
@@ -9,13 +11,12 @@ router = APIRouter()
 async def get_cajas(activa_only: bool = False):
     """Obtener todas las cajas"""
     try:
-        query = supabase.table("cajas").select("*").order("nombre")
-        
+        mongo_filter = {}
         if activa_only:
-            query = query.eq("activa", True)
-        
-        result = query.execute()
-        return result.data
+            mongo_filter["activa"] = True
+
+        cajas = list(db.cajas.find(mongo_filter, {"_id": 0}).sort("nombre", ASCENDING))
+        return cajas
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -23,12 +24,12 @@ async def get_cajas(activa_only: bool = False):
 async def get_caja(caja_id: int):
     """Obtener una caja por ID"""
     try:
-        result = supabase.table("cajas").select("*").eq("id", caja_id).execute()
-        
-        if not result.data:
+        caja = db.cajas.find_one({"id": caja_id}, {"_id": 0})
+
+        if not caja:
             raise HTTPException(status_code=404, detail="Caja no encontrada")
-        
-        return result.data[0]
+
+        return caja
     except HTTPException:
         raise
     except Exception as e:
@@ -38,12 +39,22 @@ async def get_caja(caja_id: int):
 async def create_caja(caja: CajaCreate):
     """Crear una nueva caja"""
     try:
-        result = supabase.table("cajas").insert(caja.model_dump()).execute()
-        
-        if not result.data:
+        existing = db.cajas.find_one({"nombre": caja.nombre}, {"_id": 0, "id": 1})
+        if existing:
+            raise HTTPException(status_code=400, detail="Ya existe una caja con ese nombre")
+
+        caja_dict = caja.model_dump()
+        caja_dict["id"] = get_next_sequence("cajas")
+        caja_dict["created_at"] = datetime.utcnow()
+        db.cajas.insert_one(caja_dict)
+
+        if not caja_dict:
             raise HTTPException(status_code=400, detail="Error al crear la caja")
-        
-        return result.data[0]
+
+        caja_dict.pop("_id", None)
+        return caja_dict
+    except HTTPException:
+        raise
     except Exception as e:
         if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
             raise HTTPException(status_code=400, detail="Ya existe una caja con ese nombre")
@@ -54,21 +65,22 @@ async def update_caja(caja_id: int, caja_update: CajaUpdate):
     """Actualizar una caja"""
     try:
         # Verificar que la caja existe
-        check = supabase.table("cajas").select("id").eq("id", caja_id).execute()
-        if not check.data:
+        check = db.cajas.find_one({"id": caja_id}, {"_id": 0, "id": 1})
+        if not check:
             raise HTTPException(status_code=404, detail="Caja no encontrada")
-        
+
         # Actualizar solo los campos proporcionados
         update_data = caja_update.model_dump(exclude_unset=True)
         if not update_data:
             raise HTTPException(status_code=400, detail="No hay datos para actualizar")
-        
-        result = supabase.table("cajas").update(update_data).eq("id", caja_id).execute()
-        
-        if not result.data:
+
+        db.cajas.update_one({"id": caja_id}, {"$set": update_data})
+        updated = db.cajas.find_one({"id": caja_id}, {"_id": 0})
+
+        if not updated:
             raise HTTPException(status_code=400, detail="Error al actualizar la caja")
-        
-        return result.data[0]
+
+        return updated
     except HTTPException:
         raise
     except Exception as e:
@@ -79,16 +91,16 @@ async def delete_caja(caja_id: int):
     """Eliminar una caja (soft delete - marcar como inactiva)"""
     try:
         # Verificar que la caja existe
-        check = supabase.table("cajas").select("id").eq("id", caja_id).execute()
-        if not check.data:
+        check = db.cajas.find_one({"id": caja_id}, {"_id": 0, "id": 1})
+        if not check:
             raise HTTPException(status_code=404, detail="Caja no encontrada")
-        
+
         # Marcar como inactiva en lugar de eliminar
-        result = supabase.table("cajas").update({"activa": False}).eq("id", caja_id).execute()
-        
-        if not result.data:
+        result = db.cajas.update_one({"id": caja_id}, {"$set": {"activa": False}})
+
+        if result.matched_count == 0:
             raise HTTPException(status_code=400, detail="Error al desactivar la caja")
-        
+
         return {"message": "Caja desactivada exitosamente"}
     except HTTPException:
         raise
@@ -100,27 +112,23 @@ async def get_caja_saldo(caja_id: int):
     """Obtener el saldo actual de una caja"""
     try:
         # Verificar que la caja existe
-        check = supabase.table("cajas").select("id, nombre, saldo_inicial").eq("id", caja_id).execute()
-        if not check.data:
+        caja_info = db.cajas.find_one({"id": caja_id}, {"_id": 0, "id": 1, "nombre": 1, "saldo_inicial": 1})
+        if not caja_info:
             raise HTTPException(status_code=404, detail="Caja no encontrada")
-        
-        caja_info = check.data[0]
-        
+
         # Obtener la última operación de caja
-        result = supabase.table("cash_operations")\
-            .select("saldo")\
-            .eq("caja_id", caja_id)\
-            .order("fecha", desc=True)\
-            .order("id", desc=True)\
-            .limit(1)\
-            .execute()
-        
-        if result.data:
-            saldo = result.data[0]["saldo"]
+        result = db.cash_operations.find_one(
+            {"caja_id": caja_id},
+            {"_id": 0, "saldo": 1},
+            sort=[("fecha", DESCENDING), ("id", DESCENDING)],
+        )
+
+        if result:
+            saldo = result["saldo"]
         else:
             # Si no hay operaciones, usar el saldo inicial
             saldo = caja_info["saldo_inicial"]
-        
+
         return {
             "caja_id": caja_id,
             "caja_nombre": caja_info["nombre"],
@@ -136,17 +144,13 @@ async def get_productos_por_caja(caja_id: int):
     """Obtener todos los productos de una caja específica"""
     try:
         # Verificar que la caja existe
-        check = supabase.table("cajas").select("id").eq("id", caja_id).execute()
-        if not check.data:
+        check = db.cajas.find_one({"id": caja_id}, {"_id": 0, "id": 1})
+        if not check:
             raise HTTPException(status_code=404, detail="Caja no encontrada")
-        
-        result = supabase.table("products")\
-            .select("*")\
-            .eq("caja_id", caja_id)\
-            .order("name")\
-            .execute()
-        
-        return result.data
+
+        result = list(db.products.find({"caja_id": caja_id}, {"_id": 0}).sort("name", ASCENDING))
+
+        return result
     except HTTPException:
         raise
     except Exception as e:

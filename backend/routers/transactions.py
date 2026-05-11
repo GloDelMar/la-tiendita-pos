@@ -1,10 +1,39 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 from models.schemas import Transaction, TransactionCreate
-from database import supabase
-from datetime import datetime, timedelta
+from database import db, get_next_sequence
+from datetime import datetime
+from pymongo import DESCENDING
 
 router = APIRouter()
+
+
+def _parse_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _current_balance(caja_id: Optional[int]) -> float:
+    balance_filter = {}
+    if caja_id is not None:
+        balance_filter["caja_id"] = caja_id
+
+    last_operation = db.cash_operations.find_one(
+        balance_filter,
+        {"_id": 0},
+        sort=[("fecha", DESCENDING), ("id", DESCENDING)],
+    )
+
+    if last_operation:
+        return float(last_operation.get("saldo", 0))
+
+    if caja_id is not None:
+        caja = db.cajas.find_one({"id": caja_id}, {"_id": 0, "saldo_inicial": 1})
+        if caja:
+            return float(caja.get("saldo_inicial", 0))
+
+    return 0.0
 
 @router.get("/", response_model=List[Transaction])
 async def get_transactions(
@@ -19,24 +48,27 @@ async def get_transactions(
 ):
     """Obtener transacciones con filtros opcionales"""
     try:
-        query = supabase.table("transactions").select("*")
-        
-        # Aplicar filtros
+        mongo_filter = {}
         if fecha_desde:
-            query = query.gte("fecha", fecha_desde)
+            mongo_filter.setdefault("fecha", {})["$gte"] = _parse_date(fecha_desde)
         if fecha_hasta:
-            query = query.lte("fecha", fecha_hasta)
+            mongo_filter.setdefault("fecha", {})["$lte"] = _parse_date(fecha_hasta)
         if cliente:
-            query = query.ilike("cliente", f"%{cliente}%")
+            mongo_filter["cliente"] = {"$regex": cliente, "$options": "i"}
         if grupo:
-            query = query.eq("grupo", grupo)
-        if caja_id:
-            query = query.eq("caja_id", caja_id)
+            mongo_filter["grupo"] = grupo
+        if caja_id is not None:
+            mongo_filter["caja_id"] = caja_id
         if pagado:
-            query = query.eq("pagado", pagado)
-        
-        response = query.order("fecha", desc=True).range(skip, skip + limit - 1).execute()
-        return response.data
+            mongo_filter["pagado"] = pagado
+
+        transactions = list(
+            db.transactions.find(mongo_filter, {"_id": 0})
+            .sort([("fecha", DESCENDING), ("id", DESCENDING)])
+            .skip(skip)
+            .limit(limit)
+        )
+        return transactions
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener transacciones: {str(e)}")
 
@@ -44,10 +76,10 @@ async def get_transactions(
 async def get_transaction(transaction_id: int):
     """Obtener una transacción por ID"""
     try:
-        response = supabase.table("transactions").select("*").eq("id", transaction_id).execute()
-        if not response.data:
+        transaction = db.transactions.find_one({"id": transaction_id}, {"_id": 0})
+        if not transaction:
             raise HTTPException(status_code=404, detail="Transacción no encontrada")
-        return response.data[0]
+        return transaction
     except HTTPException:
         raise
     except Exception as e:
@@ -58,13 +90,15 @@ async def create_transaction(transaction: TransactionCreate):
     """Crear una nueva transacción"""
     try:
         transaction_dict = transaction.model_dump()
+        transaction_dict["id"] = get_next_sequence("transactions")
+        transaction_dict["fecha"] = datetime.utcnow()
         print(f"[DEBUG] Transaction data received: {transaction_dict}")
-        
+
         # Registrar en transacciones
-        response = supabase.table("transactions").insert(transaction_dict).execute()
-        print(f"[DEBUG] Supabase response: {response}")
-        created_transaction = response.data[0]
-        
+        db.transactions.insert_one(transaction_dict)
+        created_transaction = dict(transaction_dict)
+        created_transaction.pop("_id", None)
+
         # Si no está pagado, registrar como deudor
         if transaction.pagado == "NO":
             debtor_data = {
@@ -73,50 +107,44 @@ async def create_transaction(transaction: TransactionCreate):
                 "deuda": transaction.total - transaction.pago,
                 "caja_id": transaction.caja_id
             }
-            
+
             # Verificar si el deudor ya existe
-            existing_query = supabase.table("debtors").select("*").eq("nombre", transaction.cliente).eq("grupo", transaction.grupo)
-            if transaction.caja_id:
-                existing_query = existing_query.eq("caja_id", transaction.caja_id)
-            existing = existing_query.execute()
-            
-            if existing.data:
+            existing_filter = {"nombre": transaction.cliente, "grupo": transaction.grupo}
+            if transaction.caja_id is not None:
+                existing_filter["caja_id"] = transaction.caja_id
+            existing = db.debtors.find_one(existing_filter, {"_id": 0})
+
+            if existing:
                 # Actualizar deuda existente
-                new_debt = existing.data[0]["deuda"] + debtor_data["deuda"]
-                supabase.table("debtors").update({
-                    "deuda": new_debt,
-                    "ultima_compra": created_transaction["fecha"]
-                }).eq("id", existing.data[0]["id"]).execute()
+                new_debt = float(existing["deuda"]) + float(debtor_data["deuda"])
+                db.debtors.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {"deuda": new_debt, "ultima_compra": created_transaction["fecha"]}},
+                )
             else:
                 # Crear nuevo deudor
-                supabase.table("debtors").insert(debtor_data).execute()
-        
+                debtor_data["id"] = get_next_sequence("debtors")
+                debtor_data["fecha_primera_deuda"] = created_transaction["fecha"]
+                debtor_data["ultima_compra"] = created_transaction["fecha"]
+                db.debtors.insert_one(debtor_data)
+
         # Registrar movimiento en caja solo si hay pago
         if transaction.pago > 0:
-            # Obtener saldo actual de la caja específica
-            balance_query = supabase.table("cash_operations").select("*").order("fecha", desc=True).order("id", desc=True).limit(1)
-            if transaction.caja_id:
-                balance_query = balance_query.eq("caja_id", transaction.caja_id)
-            last_operation = balance_query.execute()
-            
-            # Si no hay operaciones previas, obtener saldo inicial de la caja
-            if not last_operation.data and transaction.caja_id:
-                caja = supabase.table("cajas").select("saldo_inicial").eq("id", transaction.caja_id).execute()
-                current_balance = caja.data[0]["saldo_inicial"] if caja.data else 0
-            else:
-                current_balance = last_operation.data[0]["saldo"] if last_operation.data else 0
-            
+            current_balance = _current_balance(transaction.caja_id)
+
             # Usar el TOTAL de la venta, no el pago
             cash_operation = {
                 "tipo_operacion": "VENTA",
                 "monto": transaction.total,  # Total de la venta, no el pago
                 "descripcion": f"Venta a {transaction.cliente} - {len(transaction.productos)} productos",
                 "caja_id": transaction.caja_id,
-                "saldo": current_balance + transaction.total  # Sumar el total
+                "saldo": current_balance + transaction.total,  # Sumar el total
+                "id": get_next_sequence("cash_operations"),
+                "fecha": created_transaction["fecha"],
             }
-            
-            supabase.table("cash_operations").insert(cash_operation).execute()
-        
+
+            db.cash_operations.insert_one(cash_operation)
+
         return created_transaction
     except Exception as e:
         print(f"[ERROR] Error creating transaction: {str(e)}")
@@ -132,23 +160,25 @@ async def get_daily_stats(fecha: Optional[str] = None):
         if not fecha:
             fecha = datetime.now().strftime("%Y-%m-%d")
         
-        fecha_inicio = f"{fecha}T00:00:00"
-        fecha_fin = f"{fecha}T23:59:59"
-        
+        fecha_inicio = datetime.fromisoformat(f"{fecha}T00:00:00")
+        fecha_fin = datetime.fromisoformat(f"{fecha}T23:59:59")
+
         # Transacciones del día
-        transactions = supabase.table("transactions").select("*").gte("fecha", fecha_inicio).lte("fecha", fecha_fin).execute()
-        
-        total_ventas = sum(t["total"] for t in transactions.data)
-        total_efectivo = sum(t["pago"] for t in transactions.data)
-        total_credito = sum(t["total"] - t["pago"] for t in transactions.data if t["pagado"] == "NO")
-        
+        transactions = list(
+            db.transactions.find({"fecha": {"$gte": fecha_inicio, "$lte": fecha_fin}}, {"_id": 0})
+        )
+
+        total_ventas = sum(t["total"] for t in transactions)
+        total_efectivo = sum(t["pago"] for t in transactions)
+        total_credito = sum(t["total"] - t["pago"] for t in transactions if t["pagado"] == "NO")
+
         return {
             "fecha": fecha,
-            "total_transacciones": len(transactions.data),
+            "total_transacciones": len(transactions),
             "total_ventas": total_ventas,
             "total_efectivo": total_efectivo,
             "total_credito": total_credito,
-            "promedio_ticket": total_ventas / len(transactions.data) if transactions.data else 0
+            "promedio_ticket": total_ventas / len(transactions) if transactions else 0
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {str(e)}")
@@ -157,26 +187,28 @@ async def get_daily_stats(fecha: Optional[str] = None):
 async def get_monthly_stats(year: int = Query(...), month: int = Query(..., ge=1, le=12)):
     """Obtener estadísticas del mes"""
     try:
-        fecha_inicio = f"{year}-{month:02d}-01T00:00:00"
-        
+        fecha_inicio = datetime.fromisoformat(f"{year}-{month:02d}-01T00:00:00")
+
         # Calcular último día del mes
         if month == 12:
-            next_month = f"{year + 1}-01-01"
+            next_month = datetime.fromisoformat(f"{year + 1}-01-01T00:00:00")
         else:
-            next_month = f"{year}-{month + 1:02d}-01"
-        
-        transactions = supabase.table("transactions").select("*").gte("fecha", fecha_inicio).lt("fecha", next_month).execute()
-        
-        total_ventas = sum(t["total"] for t in transactions.data)
-        total_efectivo = sum(t["pago"] for t in transactions.data)
-        
+            next_month = datetime.fromisoformat(f"{year}-{month + 1:02d}-01T00:00:00")
+
+        transactions = list(
+            db.transactions.find({"fecha": {"$gte": fecha_inicio, "$lt": next_month}}, {"_id": 0})
+        )
+
+        total_ventas = sum(t["total"] for t in transactions)
+        total_efectivo = sum(t["pago"] for t in transactions)
+
         return {
             "year": year,
             "month": month,
-            "total_transacciones": len(transactions.data),
+            "total_transacciones": len(transactions),
             "total_ventas": total_ventas,
             "total_efectivo": total_efectivo,
-            "promedio_diario": total_ventas / 30 if transactions.data else 0
+            "promedio_diario": total_ventas / 30 if transactions else 0
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas mensuales: {str(e)}")
@@ -192,18 +224,23 @@ async def get_transactions_by_teacher(
 ):
     """Obtener todas las transacciones de un maestro específico"""
     try:
-        query = supabase.table("transactions").select("*").eq("cliente", teacher_name)
-        
+        mongo_filter = {"cliente": teacher_name}
+
         # Aplicar filtros
         if fecha_desde:
-            query = query.gte("fecha", fecha_desde)
+            mongo_filter.setdefault("fecha", {})["$gte"] = _parse_date(fecha_desde)
         if fecha_hasta:
-            query = query.lte("fecha", fecha_hasta)
+            mongo_filter.setdefault("fecha", {})["$lte"] = _parse_date(fecha_hasta)
         if only_unpaid:
-            query = query.eq("pagado", "NO")
-        
-        response = query.order("fecha", desc=True).range(skip, skip + limit - 1).execute()
-        return response.data
+            mongo_filter["pagado"] = "NO"
+
+        transactions = list(
+            db.transactions.find(mongo_filter, {"_id": 0})
+            .sort([("fecha", DESCENDING), ("id", DESCENDING)])
+            .skip(skip)
+            .limit(limit)
+        )
+        return transactions
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener transacciones del maestro: {str(e)}")
 
@@ -212,9 +249,9 @@ async def get_teacher_summary(teacher_name: str):
     """Obtener resumen de transacciones de un maestro"""
     try:
         # Obtener todas las transacciones del maestro
-        transactions = supabase.table("transactions").select("*").eq("cliente", teacher_name).execute()
-        
-        if not transactions.data:
+        transactions = list(db.transactions.find({"cliente": teacher_name}, {"_id": 0}))
+
+        if not transactions:
             return {
                 "teacher_name": teacher_name,
                 "total_transactions": 0,
@@ -223,16 +260,16 @@ async def get_teacher_summary(teacher_name: str):
                 "total_pending": 0,
                 "unpaid_transactions": []
             }
-        
-        total_amount = sum(t["total"] for t in transactions.data)
-        total_paid = sum(t["pago"] for t in transactions.data)
-        total_pending = sum(t["total"] - t["pago"] for t in transactions.data if t["pagado"] == "NO")
-        unpaid_transactions = [t for t in transactions.data if t["pagado"] == "NO"]
-        
+
+        total_amount = sum(t["total"] for t in transactions)
+        total_paid = sum(t["pago"] for t in transactions)
+        total_pending = sum(t["total"] - t["pago"] for t in transactions if t["pagado"] == "NO")
+        unpaid_transactions = [t for t in transactions if t["pagado"] == "NO"]
+
         return {
             "teacher_name": teacher_name,
-            "grupo": transactions.data[0]["grupo"] if transactions.data else "",
-            "total_transactions": len(transactions.data),
+            "grupo": transactions[0]["grupo"] if transactions else "",
+            "total_transactions": len(transactions),
             "total_amount": total_amount,
             "total_paid": total_paid,
             "total_pending": total_pending,

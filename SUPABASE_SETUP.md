@@ -33,6 +33,8 @@ touch .env
 
 ```env
 SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
+SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+# Opcional (compatibilidad)
 SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
@@ -167,7 +169,7 @@ Tu backend ahora está conectado a Supabase y listo para usar.
 
 ### Error de conexión:
 - Verifica que el archivo `.env` tiene las credenciales correctas
-- Asegúrate de que `SUPABASE_URL` y `SUPABASE_KEY` están sin comillas adicionales
+- Asegúrate de que `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` están sin comillas adicionales
 
 ### Error 403 en Storage:
 - Verifica que el bucket es público

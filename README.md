@@ -52,6 +52,8 @@ pip install -r requirements.txt
 ```bash
 # Editar backend/.env con tus credenciales de Supabase
 SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_SERVICE_KEY=tu_service_role_key_aqui
+# Opcional (compatibilidad):
 SUPABASE_KEY=tu_api_key_aqui
 ```
 
