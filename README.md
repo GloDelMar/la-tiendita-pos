@@ -1,13 +1,13 @@
 # La Tiendita POS - Sistema Web
 
-Sistema de Punto de Venta moderno desarrollado con Next.js, FastAPI y Supabase.
+Sistema de Punto de Venta moderno desarrollado con Next.js, FastAPI y MongoDB.
 
 ## 🏗️ Arquitectura
 
 - **Frontend**: Next.js 14 + TypeScript + Tailwind CSS
 - **Backend**: FastAPI + Python 3.11
-- **Base de Datos**: Supabase (PostgreSQL)
-- **Storage**: Supabase Storage (imágenes de productos)
+- **Base de Datos**: MongoDB Atlas
+- **Storage**: Archivos locales servidos por FastAPI (`/static`)
 
 ## 📁 Estructura del Proyecto
 
@@ -17,7 +17,7 @@ la_tiendita/
 ├── backend/           # API FastAPI
 │   ├── routers/      # Endpoints de la API
 │   ├── models/       # Modelos Pydantic
-│   ├── database.py   # Cliente Supabase
+│   ├── database.py   # Conexión MongoDB
 │   ├── main.py       # App FastAPI
 │   └── .env          # Variables de entorno
 ├── kivy_app/         # App original de Kivy (referencia)
@@ -30,7 +30,7 @@ la_tiendita/
 
 - Python 3.11+
 - Node.js 20+ (recomendado)
-- Cuenta de Supabase (gratuita)
+- Cuenta de MongoDB Atlas (opcional para producción)
 
 ### Configuración Backend
 
@@ -50,29 +50,25 @@ pip install -r requirements.txt
 
 3. **Configurar variables de entorno**:
 ```bash
-# Editar backend/.env con tus credenciales de Supabase
-SUPABASE_URL=https://tu-proyecto.supabase.co
-SUPABASE_SERVICE_KEY=tu_service_role_key_aqui
-# Opcional (compatibilidad):
-SUPABASE_KEY=tu_api_key_aqui
+# Editar backend/.env con tu configuración de MongoDB
+MONGODB_URI=mongodb://localhost:27017
+MONGODB_DB=la_tiendita
+FRONTEND_URL=http://localhost:3000
+MONGODB_SERVER_SELECTION_TIMEOUT_MS=15000
 ```
 
-4. **Crear base de datos**:
-   - Ve a tu proyecto de Supabase
-   - SQL Editor > New Query
-   - Pega el contenido de `backend/database_schema.sql`
-   - Ejecuta (Run)
+4. **Para producción con Atlas**:
+   - Crea un cluster en MongoDB Atlas (M0 Free)
+   - Crea usuario de base de datos con permisos `readWrite`
+   - En `Network Access`, permite IPs necesarias (temporalmente `0.0.0.0/0`)
+   - Usa una URI tipo `mongodb+srv://...`
 
-5. **Configurar Storage**:
-   - Storage > Create bucket: `product-images` (público)
-   - Configura las políticas según `SUPABASE_SETUP.md`
-
-6. **Insertar datos de prueba** (opcional):
+5. **Insertar datos de prueba** (opcional):
 ```bash
 python seed_data.py
 ```
 
-7. **Iniciar servidor**:
+6. **Iniciar servidor**:
 ```bash
 uvicorn main:app --reload
 ```
@@ -194,14 +190,15 @@ Ver guías detalladas en la carpeta `/docs`
 ### Backend
 - FastAPI 0.115.5
 - Pydantic 2.10.3 (validación)
-- Supabase 2.10.0 (database + storage)
+- PyMongo 4.10.1 (acceso a MongoDB)
+- Certifi (CA bundle para TLS en Atlas)
 - Python-dotenv (env vars)
 - ReportLab (generación de PDFs)
 
 ### Base de Datos
-- PostgreSQL (Supabase)
-- 4 tablas: products, transactions, debtors, cash_operations
-- Storage bucket para imágenes
+- MongoDB (colecciones)
+- Colecciones principales: products, transactions, debtors, cash_operations, cajas
+- Imágenes servidas desde `/static/products`
 
 ## 📝 Características
 
@@ -235,11 +232,17 @@ Ver guías detalladas en la carpeta `/docs`
 - API Keys en variables de entorno
 - CORS configurado
 - Validación de datos con Pydantic
-- Storage con políticas de acceso
+- Control de acceso por contraseña en frontend
 
 ## 📄 Licencia
 
-MIT
+Propietaria (Todos los derechos reservados).
+
+Ver [LICENSE](LICENSE).
+
+## © Aviso de Derechos y Uso
+
+Creado por Gloriela Suárez Casañeda para uso exclusivo de los alumnos del grupo de Taller de Formación Laboral de CAM 15 de Bahía de Banderas, Nayarit, México, y con consentimiento de Gloriela.
 
 ## 👥 Contribuir
 
