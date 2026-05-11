@@ -1,16 +1,23 @@
 import os
 from pymongo import ASCENDING, MongoClient, ReturnDocument
 from dotenv import load_dotenv
+import certifi
 
 load_dotenv()
 
 mongodb_uri: str = os.getenv("MONGODB_URI", "").strip()
 mongodb_db_name: str = os.getenv("MONGODB_DB", "la_tiendita").strip()
+mongodb_timeout_ms: int = int(os.getenv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "15000"))
 
 if not mongodb_uri:
     raise RuntimeError("Missing MONGODB_URI in environment configuration")
 
-mongo_client: MongoClient = MongoClient(mongodb_uri, serverSelectionTimeoutMS=5000)
+mongo_client: MongoClient = MongoClient(
+    mongodb_uri,
+    serverSelectionTimeoutMS=mongodb_timeout_ms,
+    tls=True,
+    tlsCAFile=certifi.where(),
+)
 mongo_client.admin.command("ping")
 db = mongo_client[mongodb_db_name]
 
