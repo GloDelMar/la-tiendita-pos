@@ -4,8 +4,8 @@ from models.schemas import Product, ProductCreate, ProductUpdate
 from database import db, get_next_sequence
 from pymongo import ASCENDING
 import uuid
-from pathlib import Path
 from datetime import datetime
+from services.storage import save_product_image, delete_product_image
 
 router = APIRouter()
 
@@ -91,11 +91,8 @@ async def delete_product(product_id: int):
 
         # Eliminar imagen si existe
         if existing.get("image_url"):
-            image_path = existing["image_url"].split("/")[-1]
             try:
-                image_file = Path(__file__).resolve().parents[1] / "uploads" / "products" / image_path
-                if image_file.exists():
-                    image_file.unlink()
+                delete_product_image(existing["image_url"])
             except:
                 pass  # Continuar aunque falle el borrado de imagen
 
@@ -123,15 +120,13 @@ async def upload_product_image(product_id: int, file: UploadFile = File(...)):
         ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
         unique_name = f"{product_id}_{uuid.uuid4()}.{ext}"
 
-        # Guardar archivo localmente
-        uploads_dir = Path(__file__).resolve().parents[1] / "uploads" / "products"
-        uploads_dir.mkdir(parents=True, exist_ok=True)
+        # Guardar archivo en S3 (si esta configurado) o localmente como fallback
         file_bytes = await file.read()
-        target_file = uploads_dir / unique_name
-        target_file.write_bytes(file_bytes)
-
-        # URL pública servida por FastAPI
-        public_url = f"/static/products/{unique_name}"
+        public_url = save_product_image(
+            unique_name=unique_name,
+            file_bytes=file_bytes,
+            content_type=file.content_type or "image/jpeg",
+        )
 
         # Actualizar producto con nueva URL
         db.products.update_one({"id": product_id}, {"$set": {"image_url": public_url}})

@@ -7,7 +7,7 @@ Sistema de Punto de Venta moderno desarrollado con Next.js, FastAPI y MongoDB.
 - **Frontend**: Next.js 14 + TypeScript + Tailwind CSS
 - **Backend**: FastAPI + Python 3.11
 - **Base de Datos**: MongoDB Atlas
-- **Storage**: Archivos locales servidos por FastAPI (`/static`)
+- **Storage**: AWS S3 (recomendado) o archivos locales servidos por FastAPI (`/static`)
 
 ## 📁 Estructura del Proyecto
 
@@ -55,6 +55,16 @@ MONGODB_URI=mongodb://localhost:27017
 MONGODB_DB=la_tiendita
 FRONTEND_URL=http://localhost:3000
 MONGODB_SERVER_SELECTION_TIMEOUT_MS=15000
+
+# Opcional: Storage en AWS S3 para imagenes de productos
+AWS_S3_BUCKET=tu-bucket
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=tu-access-key
+AWS_SECRET_ACCESS_KEY=tu-secret-key
+# Opcional si usas CDN o CloudFront:
+# AWS_S3_PUBLIC_URL=https://cdn.tudominio.com
+# Opcional para S3-compatible (no AWS puro):
+# AWS_S3_ENDPOINT_URL=https://s3.tu-proveedor.com
 ```
 
 4. **Para producción con Atlas**:
@@ -198,7 +208,8 @@ Ver guías detalladas en la carpeta `/docs`
 ### Base de Datos
 - MongoDB (colecciones)
 - Colecciones principales: products, transactions, debtors, cash_operations, cajas
-- Imágenes servidas desde `/static/products`
+- Imagenes en AWS S3 cuando `AWS_S3_BUCKET` esta configurado
+- Fallback a `/static/products` cuando S3 no esta configurado
 
 ## 📝 Características
 
