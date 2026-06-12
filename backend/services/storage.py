@@ -98,14 +98,40 @@ def get_s3_object_key(image_url: str) -> str:
     return parsed.path.lstrip("/")
 
 
-def load_s3_product_image(image_url: str) -> tuple[bytes, str]:
-    object_key = get_s3_object_key(image_url)
-    if not object_key:
-        raise FileNotFoundError("La URL de la imagen no contiene una clave valida")
+def _get_s3_bucket_and_key(image_url: str) -> tuple[str, str]:
+    parsed = urlparse(image_url)
+    host = (parsed.netloc or "").lower()
+    raw_path = parsed.path.lstrip("/")
 
-    bucket = os.getenv("AWS_S3_BUCKET")
-    if not bucket:
-        raise RuntimeError("AWS_S3_BUCKET no esta configurado")
+    # Formato virtual-hosted:
+    # - <bucket>.s3.amazonaws.com/<key>
+    # - <bucket>.s3.<region>.amazonaws.com/<key>
+    # - <bucket>.s3-<region>.amazonaws.com/<key>
+    if ".s3." in host or ".s3-" in host:
+        bucket = host.split(".s3", 1)[0]
+        key = raw_path
+        if bucket and key:
+            return bucket, key
+
+    # Formato path-style:
+    # - s3.amazonaws.com/<bucket>/<key>
+    # - s3.<region>.amazonaws.com/<bucket>/<key>
+    # - s3-<region>.amazonaws.com/<bucket>/<key>
+    if host.startswith("s3"):
+        parts = raw_path.split("/", 1)
+        if len(parts) == 2 and parts[0] and parts[1]:
+            return parts[0], parts[1]
+
+    # Fallback (CDN/custom domain): usar bucket configurado y path como key.
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    if bucket and raw_path:
+        return bucket, raw_path
+
+    raise FileNotFoundError("No se pudo determinar bucket/key desde image_url")
+
+
+def load_s3_product_image(image_url: str) -> tuple[bytes, str]:
+    bucket, object_key = _get_s3_bucket_and_key(image_url)
 
     s3_client = _get_s3_client()
     response = s3_client.get_object(Bucket=bucket, Key=object_key)
