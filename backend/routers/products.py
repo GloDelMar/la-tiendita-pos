@@ -1,11 +1,17 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from typing import List, Optional
 from models.schemas import Product, ProductCreate, ProductUpdate
 from database import db, get_next_sequence
 from pymongo import ASCENDING
 import uuid
 from datetime import datetime
-from services.storage import save_product_image, delete_product_image
+from services.storage import (
+    save_product_image,
+    delete_product_image,
+    get_local_product_image_path,
+    load_s3_product_image,
+)
 
 router = APIRouter()
 
@@ -41,6 +47,36 @@ async def get_product(product_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener producto: {str(e)}")
+
+
+@router.get("/{product_id}/image")
+async def get_product_image(product_id: int):
+    """Servir la imagen del producto mediante el backend para evitar URLs rotas o privadas."""
+    try:
+        product = db.products.find_one({"id": product_id}, {"_id": 0})
+        if not product:
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+        image_url = product.get("image_url")
+        if not image_url:
+            raise HTTPException(status_code=404, detail="Producto sin imagen")
+
+        if image_url.startswith("http"):
+            try:
+                content, content_type = load_s3_product_image(image_url)
+                return Response(content=content, media_type=content_type)
+            except Exception:
+                return RedirectResponse(url=image_url, status_code=307)
+
+        image_path = get_local_product_image_path(image_url)
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail="Archivo de imagen no encontrado")
+
+        return FileResponse(path=image_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener imagen: {str(e)}")
 
 @router.post("/", response_model=Product, status_code=201)
 async def create_product(product: ProductCreate):

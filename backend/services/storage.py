@@ -86,3 +86,28 @@ def delete_product_image(image_url: str) -> None:
     image_file = Path(__file__).resolve().parents[1] / "uploads" / "products" / image_path
     if image_file.exists():
         image_file.unlink()
+
+
+def get_local_product_image_path(image_url: str) -> Path:
+    image_name = image_url.split("/")[-1]
+    return Path(__file__).resolve().parents[1] / "uploads" / "products" / image_name
+
+
+def get_s3_object_key(image_url: str) -> str:
+    parsed = urlparse(image_url)
+    return parsed.path.lstrip("/")
+
+
+def load_s3_product_image(image_url: str) -> tuple[bytes, str]:
+    object_key = get_s3_object_key(image_url)
+    if not object_key:
+        raise FileNotFoundError("La URL de la imagen no contiene una clave valida")
+
+    bucket = os.getenv("AWS_S3_BUCKET")
+    if not bucket:
+        raise RuntimeError("AWS_S3_BUCKET no esta configurado")
+
+    s3_client = _get_s3_client()
+    response = s3_client.get_object(Bucket=bucket, Key=object_key)
+    content_type = response.get("ContentType") or "application/octet-stream"
+    return response["Body"].read(), content_type
